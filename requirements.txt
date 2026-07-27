@@ -1,0 +1,37 @@
+# ── Core scraping ────────────────────────────────────────────────────────────
+requests==2.32.3
+beautifulsoup4==4.12.3
+lxml==5.2.2
+
+# ── Database ─────────────────────────────────────────────────────────────────
+# sqlite3 is built into Python — no extra package needed
+
+# ── ML / Fine-tuning (heavy; only needed for train_model.py on Colab) ────────
+# Uncomment these only when running on Colab with GPU:
+# transformers==4.44.2
+# peft==0.12.0
+# bitsandbytes==0.43.3
+# trl==0.10.1
+# accelerate==0.34.2
+# datasets==2.21.0
+# torch>=2.3.0
+# scipy
+# sentencepiece
+# protobuf
+
+# ── LangChain + Groq (AI agent) ──────────────────────────────────────────────
+langchain==0.3.7
+langchain-groq==0.2.3
+langchain-core==0.3.19
+groq==0.11.0
+pydantic==2.9.2
+
+# ── Dashboard ────────────────────────────────────────────────────────────────
+gradio==5.9.1
+pandas==2.2.3
+matplotlib==3.9.2
+numpy==1.26.4
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+python-dotenv==1.0.1
+huggingface-hub==0.25.2
