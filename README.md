@@ -1,4 +1,4 @@
-# 🚗 CarScout — Autonomous AI Car Deal Finder
+#  CarScout — Autonomous AI Car Deal Finder
 
 > Find underpriced cars on PakWheels.com automatically — using ML price prediction, 
 > a Groq-powered AI agent, real-time Telegram/email alerts, and a live Gradio dashboard.
@@ -15,7 +15,7 @@ GaadiScout's 4-tab Gradio dashboard gives you:
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 ```
 PakWheels.com
@@ -68,7 +68,7 @@ Automation: .github/workflows/run_pipeline.yml (every 3 hours, GitHub Actions)
 
 ---
 
-## ⚡ Quick Start
+##  Quick Start
 
 ### 1. Clone & install dependencies
 
@@ -112,7 +112,7 @@ python email_alert.py   # Send a test email
 
 ---
 
-## 🔑 Getting Free API Keys
+##  Getting Free API Keys
 
 ### Groq API (AI Agent)
 1. Go to [console.groq.com](https://console.groq.com)
@@ -148,7 +148,7 @@ python email_alert.py   # Send a test email
    EMAIL_RECIPIENT=recipient@example.com
    ```
 
-**Free tier:** 500 emails/day ✅
+**Free tier:** 500 emails/day 
 
 ---
 
@@ -158,7 +158,7 @@ python email_alert.py   # Send a test email
 3. Add to `.env`: `HF_TOKEN=hf_...`
 
 Needed for: downloading models, pushing your fine-tuned adapter.  
-**Free tier:** Unlimited downloads of public models ✅
+**Free tier:** Unlimited downloads of public models 
 
 ---
 
@@ -281,7 +281,7 @@ gaadiscout/
 
 ---
 
-## 🔒 .gitignore Recommendations
+##  .gitignore Recommendations
 
 Add this to your `.gitignore`:
 ```
@@ -295,7 +295,7 @@ __pycache__/
 
 ---
 
-## 📜 License
+##  License
 
 MIT License — free for personal and educational use.
 
