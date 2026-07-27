@@ -1,4 +1,4 @@
-# 🚗 GaadiScout — Autonomous AI Car Deal Finder
+# 🚗 CarScout — Autonomous AI Car Deal Finder
 
 > Find underpriced cars on PakWheels.com automatically — using ML price prediction, 
 > a Groq-powered AI agent, real-time Telegram/email alerts, and a live Gradio dashboard.
