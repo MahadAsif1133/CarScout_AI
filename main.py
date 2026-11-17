@@ -9,12 +9,11 @@ import os
 import logging
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from db import DB_PATH, init_db, get_stats
+from db import init_db, get_stats
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(

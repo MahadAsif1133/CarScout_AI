@@ -8,14 +8,13 @@ import json
 import smtplib
 import logging
 import ssl
-from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from db import DB_PATH, get_pending_alerts, mark_alerted, log_alert
+from db import DB_PATH, get_pending_alerts, log_alert
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -238,7 +237,7 @@ def send_email(
     msg["To"]      = _recipient
 
     # Plain text fallback
-    plain = f"GaadiScout Deal Alert\n\nCheck your HTML-capable email client to view this alert."
+    plain = "GaadiScout Deal Alert\n\nCheck your HTML-capable email client to view this alert."
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 

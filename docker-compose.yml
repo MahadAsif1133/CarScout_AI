@@ -1,0 +1,57 @@
+# docker-compose.yml — Optional local services for CarScout_AI (GaadiScout)
+# Each service is placed in its own profile so NOTHING starts by default.
+#
+# Start individual profiles:
+#   docker compose --profile n8n up -d
+#   docker compose --profile mongo up -d
+#   docker compose --profile ollama up -d
+#
+# Start all optional services together:
+#   docker compose --profile n8n --profile mongo --profile ollama up -d
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: carscout-n8n
+    profiles:
+      - n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678/
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - EMAIL_SENDER=${EMAIL_SENDER:-}
+      - EMAIL_RECIPIENT=${EMAIL_RECIPIENT:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  mongo:
+    image: mongo:7
+    container_name: carscout-mongo
+    profiles:
+      - mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: carscout-ollama
+    profiles:
+      - ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  n8n_data:
+  mongo_data:
+  ollama_data:

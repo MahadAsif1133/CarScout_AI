@@ -327,7 +327,7 @@ def evaluate_deals(
 
         if evaluation is None:
             # Evaluation failed — assign a conservative score
-            logger.warning(f"  ⚠️  Evaluation failed, assigning fallback score 5")
+            logger.warning("  ⚠️  Evaluation failed, assigning fallback score 5")
             evaluation = DealEvaluation(
                 deal_score=5,
                 price_gap_percent=listing.get("price_gap_pct", 0),
@@ -407,7 +407,7 @@ if __name__ == "__main__":
     print("\nEvaluating mock listing …")
     result = evaluate_single_deal(mock_listing)
     if result:
-        print(f"\n✅ Evaluation result:")
+        print("\n✅ Evaluation result:")
         print(f"  Deal Score:  {result.deal_score}/10")
         print(f"  Price Gap:   {result.price_gap_percent:.1f}%")
         print(f"  Risk Flags:  {result.risk_flags or 'None'}")

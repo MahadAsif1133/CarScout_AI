@@ -9,7 +9,6 @@ import json
 import threading
 import logging
 from datetime import datetime
-from pathlib import Path
 
 import gradio as gr
 import pandas as pd
@@ -17,10 +16,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import numpy as np
 
 from db import (
-    DB_PATH,
     init_db,
     get_all_deals,
     get_all_listings_with_predictions,
@@ -820,7 +817,7 @@ def run_pipeline_interactive():
         
         from agent import evaluate_deals
         yield f"Stage 4/5: Scoring {len(deals)} deals using Groq LLM agent..."
-        qualifying = evaluate_deals()
+        evaluate_deals()
         
         from telegram_bot import send_alerts as tg_alerts
         yield "Stage 5/5: Sending deal alerts to Telegram bot..."
