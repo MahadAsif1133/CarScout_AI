@@ -77,11 +77,13 @@ class DealEvaluation(BaseModel):
 # ── LLM setup ─────────────────────────────────────────────────────────────────
 
 def _get_llm() -> ChatGroq:
-    if not GROQ_API_KEY:
+    api_key = os.getenv("GROQ_API_KEY", GROQ_API_KEY)
+    model = os.getenv("AGENT_MODEL", AGENT_MODEL)
+    if not api_key:
         raise ValueError("GROQ_API_KEY environment variable is not set")
     return ChatGroq(
-        api_key=GROQ_API_KEY,
-        model=AGENT_MODEL,
+        api_key=api_key,
+        model=model,
         temperature=0.1,
         max_tokens=512,
     )

@@ -224,12 +224,12 @@ def send_email(
     Send an HTML email via Gmail SMTP (SSL, port 465).
     Returns True on success, False on failure.
     """
-    _sender    = sender or EMAIL_SENDER
-    _password  = app_password or EMAIL_APP_PASSWORD
-    _recipient = recipient or EMAIL_RECIPIENT
+    _sender    = sender or os.getenv("EMAIL_SENDER", EMAIL_SENDER)
+    _password  = app_password or os.getenv("EMAIL_APP_PASSWORD", EMAIL_APP_PASSWORD)
+    _recipient = recipient or os.getenv("EMAIL_RECIPIENT", EMAIL_RECIPIENT)
 
     if not all([_sender, _password, _recipient]):
-        logger.error("Email credentials not configured (EMAIL_SENDER / EMAIL_APP_PASSWORD / EMAIL_RECIPIENT)")
+        logger.warning("Email credentials not configured (EMAIL_SENDER / EMAIL_APP_PASSWORD / EMAIL_RECIPIENT) — skipping email alert")
         return False
 
     msg = MIMEMultipart("alternative")

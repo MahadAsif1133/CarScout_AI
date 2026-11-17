@@ -73,12 +73,19 @@ def run_pipeline(log_callback=None) -> dict:
         if log_callback:
             log_callback(msg)
 
+    max_pages = int(os.getenv("SCRAPE_MAX_PAGES", str(SCRAPE_MAX_PAGES)))
+    scrape_details = os.getenv("SCRAPE_DETAILS", str(SCRAPE_DETAILS)).lower() == "true"
+    deal_threshold = float(os.getenv("DEAL_THRESHOLD", str(DEAL_THRESHOLD)))
+    agent_threshold = int(os.getenv("AGENT_THRESHOLD", str(AGENT_THRESHOLD)))
+    enable_telegram = os.getenv("ENABLE_TELEGRAM", str(ENABLE_TELEGRAM)).lower() == "true"
+    enable_email = os.getenv("ENABLE_EMAIL", str(ENABLE_EMAIL)).lower() == "true"
+
     _log("=" * 50)
     _log("🚀 GaadiScout Pipeline — Starting")
     _log(f"   Time:       {run_start.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    _log(f"   Max pages:  {SCRAPE_MAX_PAGES}")
-    _log(f"   Threshold:  {DEAL_THRESHOLD}% below market")
-    _log(f"   Agent min:  {AGENT_THRESHOLD}/10")
+    _log(f"   Max pages:  {max_pages}")
+    _log(f"   Threshold:  {deal_threshold}% below market")
+    _log(f"   Agent min:  {agent_threshold}/10")
     _log("=" * 50)
 
     # ── Stage 0: Ensure DB exists ─────────────────────────────────────────────
@@ -97,16 +104,21 @@ def run_pipeline(log_callback=None) -> dict:
     try:
         from scraper import scrape_listings
         raw_listings = scrape_listings(
-            max_pages=SCRAPE_MAX_PAGES,
-            fetch_details=SCRAPE_DETAILS,
+            max_pages=max_pages,
+            fetch_details=scrape_details,
         )
         results["listings_scraped"] = len(raw_listings)
         _log(f"   Scraped {len(raw_listings)} listings")
+        if not raw_listings:
+            _log(
+                "   ⚠️ Scraping returned 0 listings (PakWheels may be blocking "
+                "the runner IP or no listings matched). Proceeding gracefully with existing DB data."
+            )
     except Exception as e:
         err = f"Scraper failed: {e}"
         results["errors"].append(err)
         _log(f"❌ {err}")
-        # Continue with empty — we can still process any existing new listings
+        return results
 
     # ── Stage 2: Store to DB ──────────────────────────────────────────────────
     _log("\n💾 Stage 2: Storing listings to database …")
@@ -119,14 +131,15 @@ def run_pipeline(log_callback=None) -> dict:
         err = f"DB upsert failed: {e}"
         results["errors"].append(err)
         _log(f"❌ {err}")
+        return results
 
     # ── Stage 3: Detect deals ─────────────────────────────────────────────────
-    _log(f"\n🔎 Stage 3: Detecting deals (threshold: {DEAL_THRESHOLD}%) …")
+    _log(f"\n🔎 Stage 3: Detecting deals (threshold: {deal_threshold}%) …")
     candidate_deals = []
     try:
         from deal_detector import detect_deals
         candidate_deals = detect_deals(
-            deal_threshold=DEAL_THRESHOLD,
+            deal_threshold=deal_threshold,
             log_callback=_log,
         )
         results["deals_detected"] = len(candidate_deals)
@@ -137,12 +150,12 @@ def run_pipeline(log_callback=None) -> dict:
         _log(f"❌ {err}")
 
     # ── Stage 4: AI agent evaluation ──────────────────────────────────────────
-    _log(f"\n🤖 Stage 4: AI agent evaluation (min score: {AGENT_THRESHOLD}/10) …")
+    _log(f"\n🤖 Stage 4: AI agent evaluation (min score: {agent_threshold}/10) …")
     qualifying_deals = []
     try:
         from agent import evaluate_deals
         qualifying_deals = evaluate_deals(
-            agent_threshold=AGENT_THRESHOLD,
+            agent_threshold=agent_threshold,
             log_callback=_log,
         )
         results["deals_qualified"] = len(qualifying_deals)
@@ -155,8 +168,8 @@ def run_pipeline(log_callback=None) -> dict:
         _log("   ⚠️ Falling back to unscored deals for alerts")
         qualifying_deals = candidate_deals
 
-    # ── Stage 5: Telegram alerts ──────────────────────────────────────────────
-    if ENABLE_TELEGRAM:
+    # ── Stage 5: Telegram alerts (non-fatal) ──────────────────────────────────
+    if enable_telegram:
         _log("\n📱 Stage 5: Sending Telegram alerts …")
         try:
             from telegram_bot import send_alerts as tg_send
@@ -167,14 +180,14 @@ def run_pipeline(log_callback=None) -> dict:
             results["telegram_sent"] = tg_count
             _log(f"   Sent {tg_count} Telegram alerts")
         except Exception as e:
-            err = f"Telegram alerts failed: {e}"
-            results["errors"].append(err)
-            _log(f"❌ {err}")
+            warn = f"Telegram alerts failed (non-fatal): {e}"
+            logger.warning(warn)
+            _log(f"⚠️ {warn}")
     else:
         _log("\n📱 Stage 5: Telegram alerts disabled (ENABLE_TELEGRAM=false)")
 
-    # ── Stage 6: Email alerts ─────────────────────────────────────────────────
-    if ENABLE_EMAIL:
+    # ── Stage 6: Email alerts (non-fatal) ─────────────────────────────────────
+    if enable_email:
         _log("\n📧 Stage 6: Sending email alerts …")
         try:
             from email_alert import send_alerts as em_send
@@ -185,9 +198,9 @@ def run_pipeline(log_callback=None) -> dict:
             results["email_sent"] = em_count
             _log(f"   Sent {em_count} email alerts")
         except Exception as e:
-            err = f"Email alerts failed: {e}"
-            results["errors"].append(err)
-            _log(f"❌ {err}")
+            warn = f"Email alerts failed (non-fatal): {e}"
+            logger.warning(warn)
+            _log(f"⚠️ {warn}")
     else:
         _log("\n📧 Stage 6: Email alerts disabled (ENABLE_EMAIL=false)")
 
@@ -246,6 +259,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    os.environ["SCRAPE_MAX_PAGES"] = str(args.pages)
+    os.environ["DEAL_THRESHOLD"] = str(args.threshold)
     if args.no_telegram:
         os.environ["ENABLE_TELEGRAM"] = "false"
     if args.no_email:

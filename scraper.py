@@ -71,6 +71,12 @@ def _fetch_page(url: str, session: requests.Session) -> BeautifulSoup | None:
         return None
     try:
         resp = session.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code in (403, 429, 503):
+            logger.warning(
+                f"Received HTTP {resp.status_code} from {url} — "
+                "PakWheels may be rate-limiting or blocking this runner IP."
+            )
+            return None
         resp.raise_for_status()
         return BeautifulSoup(resp.content, "html.parser")
     except requests.RequestException as e:
