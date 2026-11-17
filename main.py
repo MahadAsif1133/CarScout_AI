@@ -178,39 +178,61 @@ def run_pipeline(log_callback=None) -> dict:
         _log("   ⚠️ Falling back to unscored deals for alerts")
         qualifying_deals = candidate_deals
 
-    # ── Stage 5: Telegram alerts (non-fatal) ──────────────────────────────────
-    if enable_telegram:
-        _log("\n📱 Stage 5: Sending Telegram alerts …")
+    # ── Optional n8n Webhook alerts (with fallback to Telegram/Email) ─────────
+    webhook_url = os.getenv("N8N_WEBHOOK_URL", "").strip()
+    remaining_deals = qualifying_deals
+    if webhook_url and qualifying_deals and (enable_telegram or enable_email):
+        _log("\n🌐 Attempting n8n webhook alert delivery …")
         try:
-            from telegram_bot import send_alerts as tg_send
-            tg_count = tg_send(
-                listings=qualifying_deals if qualifying_deals else None,
+            from webhook_alert import send_webhook_alerts
+            wb_sent, remaining_deals = send_webhook_alerts(
+                qualifying_deals,
                 log_callback=_log,
             )
-            results["telegram_sent"] = tg_count
-            _log(f"   Sent {tg_count} Telegram alerts")
+            results["webhook_sent"] = wb_sent
         except Exception as e:
-            warn = f"Telegram alerts failed (non-fatal): {e}"
-            logger.warning(warn)
-            _log(f"⚠️ {warn}")
+            logger.warning(f"Webhook delivery failed, falling back to direct alerts: {e}")
+            remaining_deals = qualifying_deals
+
+    # ── Stage 5: Telegram alerts (non-fatal) ──────────────────────────────────
+    if enable_telegram:
+        if webhook_url and qualifying_deals and not remaining_deals:
+            _log("\n📱 Stage 5: Telegram alerts skipped (delivered via n8n webhook)")
+        else:
+            _log("\n📱 Stage 5: Sending Telegram alerts …")
+            try:
+                from telegram_bot import send_alerts as tg_send
+                tg_count = tg_send(
+                    listings=remaining_deals if remaining_deals else None,
+                    log_callback=_log,
+                )
+                results["telegram_sent"] = tg_count
+                _log(f"   Sent {tg_count} Telegram alerts")
+            except Exception as e:
+                warn = f"Telegram alerts failed (non-fatal): {e}"
+                logger.warning(warn)
+                _log(f"⚠️ {warn}")
     else:
         _log("\n📱 Stage 5: Telegram alerts disabled (ENABLE_TELEGRAM=false)")
 
     # ── Stage 6: Email alerts (non-fatal) ─────────────────────────────────────
     if enable_email:
-        _log("\n📧 Stage 6: Sending email alerts …")
-        try:
-            from email_alert import send_alerts as em_send
-            em_count = em_send(
-                listings=qualifying_deals if qualifying_deals else None,
-                log_callback=_log,
-            )
-            results["email_sent"] = em_count
-            _log(f"   Sent {em_count} email alerts")
-        except Exception as e:
-            warn = f"Email alerts failed (non-fatal): {e}"
-            logger.warning(warn)
-            _log(f"⚠️ {warn}")
+        if webhook_url and qualifying_deals and not remaining_deals:
+            _log("\n📧 Stage 6: Email alerts skipped (delivered via n8n webhook)")
+        else:
+            _log("\n📧 Stage 6: Sending email alerts …")
+            try:
+                from email_alert import send_alerts as em_send
+                em_count = em_send(
+                    listings=remaining_deals if remaining_deals else None,
+                    log_callback=_log,
+                )
+                results["email_sent"] = em_count
+                _log(f"   Sent {em_count} email alerts")
+            except Exception as e:
+                warn = f"Email alerts failed (non-fatal): {e}"
+                logger.warning(warn)
+                _log(f"⚠️ {warn}")
     else:
         _log("\n📧 Stage 6: Email alerts disabled (ENABLE_EMAIL=false)")
 
