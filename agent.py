@@ -74,9 +74,46 @@ class DealEvaluation(BaseModel):
     )
 
 
+def configure_langsmith_tracing() -> bool:
+    """
+    Validate optional LangSmith tracing via standard environment variables:
+      LANGCHAIN_TRACING_V2 (or LANGSMITH_TRACING), LANGCHAIN_API_KEY (or LANGSMITH_API_KEY),
+      and optional LANGCHAIN_PROJECT / LANGSMITH_PROJECT / LANGCHAIN_ENDPOINT.
+    If tracing is requested without an API key, disables tracing with a warning so it stays a no-op.
+    Returns True when tracing is active, False otherwise.
+    """
+    tracing_flag = (
+        os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
+        or os.getenv("LANGSMITH_TRACING", "").lower() == "true"
+    )
+    if not tracing_flag:
+        return False
+
+    api_key = os.getenv("LANGCHAIN_API_KEY", "").strip() or os.getenv("LANGSMITH_API_KEY", "").strip()
+    if not api_key:
+        logger.warning(
+            "LangSmith tracing flag is set, but LANGCHAIN_API_KEY / LANGSMITH_API_KEY is missing. "
+            "Disabling tracing and continuing normally."
+        )
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
+        os.environ["LANGSMITH_TRACING"] = "false"
+        return False
+
+    # Normalize so both LangChain and LangGraph pick up the standard variables
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    if not os.getenv("LANGCHAIN_API_KEY"):
+        os.environ["LANGCHAIN_API_KEY"] = api_key
+    project = os.getenv("LANGCHAIN_PROJECT") or os.getenv("LANGSMITH_PROJECT")
+    if project:
+        os.environ["LANGCHAIN_PROJECT"] = project
+    logger.info(f"LangSmith tracing enabled (project={project or 'default'})")
+    return True
+
+
 # ── LLM setup ─────────────────────────────────────────────────────────────────
 
 def _get_llm() -> ChatGroq:
+    configure_langsmith_tracing()
     api_key = os.getenv("GROQ_API_KEY", GROQ_API_KEY)
     model = os.getenv("AGENT_MODEL", AGENT_MODEL)
     if not api_key:

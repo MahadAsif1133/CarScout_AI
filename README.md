@@ -67,6 +67,20 @@ flowchart TD
     alert --> END_NODE
 ```
 
+### LangSmith Tracing (Optional)
+
+You can trace both the LangGraph state transitions and the AI evaluator's LLM calls using [LangSmith](https://smith.langchain.com/) through standard environment variables (nothing is hardcoded in the code):
+
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_pt_...
+LANGCHAIN_PROJECT=CarScout_AI
+```
+
+- When `LANGCHAIN_TRACING_V2` is unset or `false` (the default), tracing is a complete no-op.
+- If `LANGCHAIN_TRACING_V2=true` is set without `LANGCHAIN_API_KEY`, the pipeline logs a warning, disables tracing automatically, and continues without failing.
+- **Free-Tier Notice**: Check LangSmith's current Developer (free) tier limits at [langchain.com/pricing](https://www.langchain.com/pricing) (typically 5,000 traces/month on the free Developer plan) so scheduled runs do not exceed your monthly quota.
+
 ---
 
 ## 🛠️ Tech Stack

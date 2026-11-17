@@ -371,6 +371,12 @@ def build_pipeline_graph():
 
 def run_graph_pipeline(log_callback: Optional[Callable[[str], None]] = None) -> dict:
     """Execute the LangGraph pipeline and return the standard summary dict."""
+    try:
+        from agent import configure_langsmith_tracing
+        configure_langsmith_tracing()
+    except Exception as e:
+        logger.warning(f"LangSmith tracing setup skipped: {e}")
+
     run_start = datetime.utcnow()
     max_pages = int(os.getenv("SCRAPE_MAX_PAGES", "5"))
     scrape_details = os.getenv("SCRAPE_DETAILS", "false").lower() == "true"
