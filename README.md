@@ -50,6 +50,23 @@ PakWheels.com
 Automation: .github/workflows/run_pipeline.yml (every 3 hours, GitHub Actions)
 ```
 
+### LangGraph Orchestration (`PIPELINE_ENGINE=langgraph`)
+
+When `PIPELINE_ENGINE=langgraph` is set (default is `legacy`), `main.py` delegates orchestration to `graph_pipeline.py`, which runs a `StateGraph` with retry policies on `scrape` and `evaluate` and conditional edges to exit early when no listings or deals qualify:
+
+```mermaid
+flowchart TD
+    START(["START"]) --> scrape["scrape (RetryPolicy)"]
+    scrape -->|"0 listings or error"| END_NODE(["END"])
+    scrape -->|"listings > 0"| predict["predict"]
+    predict --> detect_deals["detect_deals"]
+    detect_deals -->|"0 candidate deals"| END_NODE
+    detect_deals -->|"candidate deals > 0"| evaluate["evaluate (RetryPolicy)"]
+    evaluate -->|"no deal >= AGENT_THRESHOLD"| END_NODE
+    evaluate -->|"qualifying deals > 0"| alert["alert"]
+    alert --> END_NODE
+```
+
 ---
 
 ## 🛠️ Tech Stack

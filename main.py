@@ -31,6 +31,7 @@ DEAL_THRESHOLD    = float(os.getenv("DEAL_THRESHOLD", "15.0"))
 AGENT_THRESHOLD   = int(os.getenv("AGENT_THRESHOLD", "7"))
 ENABLE_TELEGRAM   = os.getenv("ENABLE_TELEGRAM", "true").lower() == "true"
 ENABLE_EMAIL      = os.getenv("ENABLE_EMAIL", "true").lower() == "true"
+PIPELINE_ENGINE   = os.getenv("PIPELINE_ENGINE", "legacy").lower().strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ ENABLE_EMAIL      = os.getenv("ENABLE_EMAIL", "true").lower() == "true"
 def run_pipeline(log_callback=None) -> dict:
     """
     Run the full GaadiScout pipeline end-to-end.
+    Supports PIPELINE_ENGINE=legacy (default) or PIPELINE_ENGINE=langgraph.
 
     Stages:
       1. Scrape PakWheels listings
@@ -55,6 +57,14 @@ def run_pipeline(log_callback=None) -> dict:
     Returns:
         Dict with summary stats for the run.
     """
+    engine = os.getenv("PIPELINE_ENGINE", PIPELINE_ENGINE).lower().strip()
+    if engine == "langgraph":
+        try:
+            from graph_pipeline import run_graph_pipeline
+            return run_graph_pipeline(log_callback=log_callback)
+        except Exception as e:
+            logger.warning(f"LangGraph engine failed ({e}); falling back to legacy pipeline")
+
     run_start = datetime.utcnow()
     results   = {
         "started_at":      run_start.isoformat(),
