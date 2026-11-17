@@ -8,11 +8,13 @@ import os
 import json
 import logging
 from typing import Optional
+import requests
 
 from dotenv import load_dotenv
 load_dotenv()
 
 from langchain_groq import ChatGroq
+from langchain_core.runnables import RunnableLambda
 from pydantic import BaseModel, Field
 
 from db import (
@@ -34,6 +36,9 @@ logger = logging.getLogger(__name__)
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
 AGENT_MODEL     = os.getenv("AGENT_MODEL", "llama-3.1-8b-instant")   # free-tier Groq model
 AGENT_THRESHOLD = int(os.getenv("AGENT_THRESHOLD", "7"))             # min deal_score to pass
+AGENT_PROVIDER  = os.getenv("AGENT_PROVIDER", "groq").lower().strip()
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "")
 
 # ── Risk-flag keyword map (pre-LLM fast filter on description text) ────────────
 RISK_KEYWORDS: dict[str, list[str]] = {
@@ -126,19 +131,64 @@ def _get_llm() -> ChatGroq:
     )
 
 
-def _build_structured_chain():
-    """Build a LangChain chain that returns DealEvaluation."""
+def _invoke_ollama_structured(messages: list[dict]) -> DealEvaluation:
+    """
+    Call an Ollama server via HTTP (/api/chat) using OLLAMA_BASE_URL and OLLAMA_MODEL
+    from the environment (no hardcoded model) and parse the response into DealEvaluation.
+    """
+    configure_langsmith_tracing()
+    base_url = os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL).strip().rstrip("/")
+    model = os.getenv("OLLAMA_MODEL", OLLAMA_MODEL).strip()
+    if not base_url or not model:
+        raise ValueError("OLLAMA_BASE_URL and OLLAMA_MODEL must be set when AGENT_PROVIDER=ollama")
+
+    schema_instruction = (
+        "\n\nRespond ONLY with valid JSON matching this schema:\n"
+        '{"deal_score": <int 1-10>, "price_gap_percent": <float>, '
+        '"risk_flags": [<str>, ...], "summary": "<str>"}'
+    )
+    formatted_msgs = []
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        if role == "system":
+            content = content + schema_instruction
+        formatted_msgs.append({"role": role, "content": content})
+
+    payload = {
+        "model": model,
+        "messages": formatted_msgs,
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0.1},
+    }
+    resp = requests.post(f"{base_url}/api/chat", json=payload, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    raw_content = (data.get("message") or {}).get("content") or data.get("response") or ""
+    parsed = json.loads(raw_content)
+    return DealEvaluation.model_validate(parsed)
+
+
+def _build_structured_chain(provider: Optional[str] = None):
+    """Build a LangChain runnable that returns DealEvaluation for groq (default) or ollama."""
+    active_provider = (provider or os.getenv("AGENT_PROVIDER", AGENT_PROVIDER)).lower().strip()
+    if active_provider == "ollama":
+        return RunnableLambda(_invoke_ollama_structured)
     llm = _get_llm()
     return llm.with_structured_output(DealEvaluation)
 
 
-# Lazy singleton to avoid re-initialising on every call
+# Lazy singleton per provider to avoid re-initialising on every call
 _chain = None
+_chain_provider = None
 
 def get_chain():
-    global _chain
-    if _chain is None:
-        _chain = _build_structured_chain()
+    global _chain, _chain_provider
+    active_provider = os.getenv("AGENT_PROVIDER", AGENT_PROVIDER).lower().strip()
+    if _chain is None or _chain_provider != active_provider:
+        _chain = _build_structured_chain(active_provider)
+        _chain_provider = active_provider
     return _chain
 
 
