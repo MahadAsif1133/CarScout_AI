@@ -131,6 +131,13 @@ def run_pipeline(log_callback=None) -> dict:
         return results
 
     # ── Stage 2: Store to DB ──────────────────────────────────────────────────
+    if os.getenv("MONGODB_URI", "").strip() and raw_listings:
+        try:
+            from mongo_store import save_raw_listings
+            save_raw_listings(raw_listings)
+        except Exception as e:
+            logger.warning(f"MongoDB raw listing archive failed (non-fatal): {e}")
+
     _log("\n💾 Stage 2: Storing listings to database …")
     try:
         from db import bulk_upsert_listings

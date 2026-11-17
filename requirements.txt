@@ -5,6 +5,7 @@ lxml==5.2.2
 
 # ── Database ─────────────────────────────────────────────────────────────────
 # sqlite3 is built into Python — no extra package needed
+pymongo>=4.6.0
 
 # ── ML / Fine-tuning (heavy; only needed for train_model.py on Colab) ────────
 # Uncomment these only when running on Colab with GPU:
