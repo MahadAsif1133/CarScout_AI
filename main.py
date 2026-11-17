@@ -9,12 +9,11 @@ import os
 import logging
 import sys
 from datetime import datetime
-from pathlib import Path
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from db import DB_PATH, init_db, get_stats
+from db import init_db, get_stats
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -31,6 +30,7 @@ DEAL_THRESHOLD    = float(os.getenv("DEAL_THRESHOLD", "15.0"))
 AGENT_THRESHOLD   = int(os.getenv("AGENT_THRESHOLD", "7"))
 ENABLE_TELEGRAM   = os.getenv("ENABLE_TELEGRAM", "true").lower() == "true"
 ENABLE_EMAIL      = os.getenv("ENABLE_EMAIL", "true").lower() == "true"
+PIPELINE_ENGINE   = os.getenv("PIPELINE_ENGINE", "legacy").lower().strip()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +40,7 @@ ENABLE_EMAIL      = os.getenv("ENABLE_EMAIL", "true").lower() == "true"
 def run_pipeline(log_callback=None) -> dict:
     """
     Run the full GaadiScout pipeline end-to-end.
+    Supports PIPELINE_ENGINE=legacy (default) or PIPELINE_ENGINE=langgraph.
 
     Stages:
       1. Scrape PakWheels listings
@@ -55,6 +56,14 @@ def run_pipeline(log_callback=None) -> dict:
     Returns:
         Dict with summary stats for the run.
     """
+    engine = os.getenv("PIPELINE_ENGINE", PIPELINE_ENGINE).lower().strip()
+    if engine == "langgraph":
+        try:
+            from graph_pipeline import run_graph_pipeline
+            return run_graph_pipeline(log_callback=log_callback)
+        except Exception as e:
+            logger.warning(f"LangGraph engine failed ({e}); falling back to legacy pipeline")
+
     run_start = datetime.utcnow()
     results   = {
         "started_at":      run_start.isoformat(),
@@ -73,12 +82,19 @@ def run_pipeline(log_callback=None) -> dict:
         if log_callback:
             log_callback(msg)
 
+    max_pages = int(os.getenv("SCRAPE_MAX_PAGES", str(SCRAPE_MAX_PAGES)))
+    scrape_details = os.getenv("SCRAPE_DETAILS", str(SCRAPE_DETAILS)).lower() == "true"
+    deal_threshold = float(os.getenv("DEAL_THRESHOLD", str(DEAL_THRESHOLD)))
+    agent_threshold = int(os.getenv("AGENT_THRESHOLD", str(AGENT_THRESHOLD)))
+    enable_telegram = os.getenv("ENABLE_TELEGRAM", str(ENABLE_TELEGRAM)).lower() == "true"
+    enable_email = os.getenv("ENABLE_EMAIL", str(ENABLE_EMAIL)).lower() == "true"
+
     _log("=" * 50)
     _log("🚀 GaadiScout Pipeline — Starting")
     _log(f"   Time:       {run_start.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    _log(f"   Max pages:  {SCRAPE_MAX_PAGES}")
-    _log(f"   Threshold:  {DEAL_THRESHOLD}% below market")
-    _log(f"   Agent min:  {AGENT_THRESHOLD}/10")
+    _log(f"   Max pages:  {max_pages}")
+    _log(f"   Threshold:  {deal_threshold}% below market")
+    _log(f"   Agent min:  {agent_threshold}/10")
     _log("=" * 50)
 
     # ── Stage 0: Ensure DB exists ─────────────────────────────────────────────
@@ -97,18 +113,30 @@ def run_pipeline(log_callback=None) -> dict:
     try:
         from scraper import scrape_listings
         raw_listings = scrape_listings(
-            max_pages=SCRAPE_MAX_PAGES,
-            fetch_details=SCRAPE_DETAILS,
+            max_pages=max_pages,
+            fetch_details=scrape_details,
         )
         results["listings_scraped"] = len(raw_listings)
         _log(f"   Scraped {len(raw_listings)} listings")
+        if not raw_listings:
+            _log(
+                "   ⚠️ Scraping returned 0 listings (PakWheels may be blocking "
+                "the runner IP or no listings matched). Proceeding gracefully with existing DB data."
+            )
     except Exception as e:
         err = f"Scraper failed: {e}"
         results["errors"].append(err)
         _log(f"❌ {err}")
-        # Continue with empty — we can still process any existing new listings
+        return results
 
     # ── Stage 2: Store to DB ──────────────────────────────────────────────────
+    if os.getenv("MONGODB_URI", "").strip() and raw_listings:
+        try:
+            from mongo_store import save_raw_listings
+            save_raw_listings(raw_listings)
+        except Exception as e:
+            logger.warning(f"MongoDB raw listing archive failed (non-fatal): {e}")
+
     _log("\n💾 Stage 2: Storing listings to database …")
     try:
         from db import bulk_upsert_listings
@@ -119,14 +147,15 @@ def run_pipeline(log_callback=None) -> dict:
         err = f"DB upsert failed: {e}"
         results["errors"].append(err)
         _log(f"❌ {err}")
+        return results
 
     # ── Stage 3: Detect deals ─────────────────────────────────────────────────
-    _log(f"\n🔎 Stage 3: Detecting deals (threshold: {DEAL_THRESHOLD}%) …")
+    _log(f"\n🔎 Stage 3: Detecting deals (threshold: {deal_threshold}%) …")
     candidate_deals = []
     try:
         from deal_detector import detect_deals
         candidate_deals = detect_deals(
-            deal_threshold=DEAL_THRESHOLD,
+            deal_threshold=deal_threshold,
             log_callback=_log,
         )
         results["deals_detected"] = len(candidate_deals)
@@ -137,12 +166,12 @@ def run_pipeline(log_callback=None) -> dict:
         _log(f"❌ {err}")
 
     # ── Stage 4: AI agent evaluation ──────────────────────────────────────────
-    _log(f"\n🤖 Stage 4: AI agent evaluation (min score: {AGENT_THRESHOLD}/10) …")
+    _log(f"\n🤖 Stage 4: AI agent evaluation (min score: {agent_threshold}/10) …")
     qualifying_deals = []
     try:
         from agent import evaluate_deals
         qualifying_deals = evaluate_deals(
-            agent_threshold=AGENT_THRESHOLD,
+            agent_threshold=agent_threshold,
             log_callback=_log,
         )
         results["deals_qualified"] = len(qualifying_deals)
@@ -155,39 +184,61 @@ def run_pipeline(log_callback=None) -> dict:
         _log("   ⚠️ Falling back to unscored deals for alerts")
         qualifying_deals = candidate_deals
 
-    # ── Stage 5: Telegram alerts ──────────────────────────────────────────────
-    if ENABLE_TELEGRAM:
-        _log("\n📱 Stage 5: Sending Telegram alerts …")
+    # ── Optional n8n Webhook alerts (with fallback to Telegram/Email) ─────────
+    webhook_url = os.getenv("N8N_WEBHOOK_URL", "").strip()
+    remaining_deals = qualifying_deals
+    if webhook_url and qualifying_deals and (enable_telegram or enable_email):
+        _log("\n🌐 Attempting n8n webhook alert delivery …")
         try:
-            from telegram_bot import send_alerts as tg_send
-            tg_count = tg_send(
-                listings=qualifying_deals if qualifying_deals else None,
+            from webhook_alert import send_webhook_alerts
+            wb_sent, remaining_deals = send_webhook_alerts(
+                qualifying_deals,
                 log_callback=_log,
             )
-            results["telegram_sent"] = tg_count
-            _log(f"   Sent {tg_count} Telegram alerts")
+            results["webhook_sent"] = wb_sent
         except Exception as e:
-            err = f"Telegram alerts failed: {e}"
-            results["errors"].append(err)
-            _log(f"❌ {err}")
+            logger.warning(f"Webhook delivery failed, falling back to direct alerts: {e}")
+            remaining_deals = qualifying_deals
+
+    # ── Stage 5: Telegram alerts (non-fatal) ──────────────────────────────────
+    if enable_telegram:
+        if webhook_url and qualifying_deals and not remaining_deals:
+            _log("\n📱 Stage 5: Telegram alerts skipped (delivered via n8n webhook)")
+        else:
+            _log("\n📱 Stage 5: Sending Telegram alerts …")
+            try:
+                from telegram_bot import send_alerts as tg_send
+                tg_count = tg_send(
+                    listings=remaining_deals if remaining_deals else None,
+                    log_callback=_log,
+                )
+                results["telegram_sent"] = tg_count
+                _log(f"   Sent {tg_count} Telegram alerts")
+            except Exception as e:
+                warn = f"Telegram alerts failed (non-fatal): {e}"
+                logger.warning(warn)
+                _log(f"⚠️ {warn}")
     else:
         _log("\n📱 Stage 5: Telegram alerts disabled (ENABLE_TELEGRAM=false)")
 
-    # ── Stage 6: Email alerts ─────────────────────────────────────────────────
-    if ENABLE_EMAIL:
-        _log("\n📧 Stage 6: Sending email alerts …")
-        try:
-            from email_alert import send_alerts as em_send
-            em_count = em_send(
-                listings=qualifying_deals if qualifying_deals else None,
-                log_callback=_log,
-            )
-            results["email_sent"] = em_count
-            _log(f"   Sent {em_count} email alerts")
-        except Exception as e:
-            err = f"Email alerts failed: {e}"
-            results["errors"].append(err)
-            _log(f"❌ {err}")
+    # ── Stage 6: Email alerts (non-fatal) ─────────────────────────────────────
+    if enable_email:
+        if webhook_url and qualifying_deals and not remaining_deals:
+            _log("\n📧 Stage 6: Email alerts skipped (delivered via n8n webhook)")
+        else:
+            _log("\n📧 Stage 6: Sending email alerts …")
+            try:
+                from email_alert import send_alerts as em_send
+                em_count = em_send(
+                    listings=remaining_deals if remaining_deals else None,
+                    log_callback=_log,
+                )
+                results["email_sent"] = em_count
+                _log(f"   Sent {em_count} email alerts")
+            except Exception as e:
+                warn = f"Email alerts failed (non-fatal): {e}"
+                logger.warning(warn)
+                _log(f"⚠️ {warn}")
     else:
         _log("\n📧 Stage 6: Email alerts disabled (ENABLE_EMAIL=false)")
 
@@ -246,6 +297,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    os.environ["SCRAPE_MAX_PAGES"] = str(args.pages)
+    os.environ["DEAL_THRESHOLD"] = str(args.threshold)
     if args.no_telegram:
         os.environ["ENABLE_TELEGRAM"] = "false"
     if args.no_email:

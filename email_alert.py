@@ -8,14 +8,13 @@ import json
 import smtplib
 import logging
 import ssl
-from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from db import DB_PATH, get_pending_alerts, mark_alerted, log_alert
+from db import DB_PATH, get_pending_alerts, log_alert
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -224,12 +223,12 @@ def send_email(
     Send an HTML email via Gmail SMTP (SSL, port 465).
     Returns True on success, False on failure.
     """
-    _sender    = sender or EMAIL_SENDER
-    _password  = app_password or EMAIL_APP_PASSWORD
-    _recipient = recipient or EMAIL_RECIPIENT
+    _sender    = sender or os.getenv("EMAIL_SENDER", EMAIL_SENDER)
+    _password  = app_password or os.getenv("EMAIL_APP_PASSWORD", EMAIL_APP_PASSWORD)
+    _recipient = recipient or os.getenv("EMAIL_RECIPIENT", EMAIL_RECIPIENT)
 
     if not all([_sender, _password, _recipient]):
-        logger.error("Email credentials not configured (EMAIL_SENDER / EMAIL_APP_PASSWORD / EMAIL_RECIPIENT)")
+        logger.warning("Email credentials not configured (EMAIL_SENDER / EMAIL_APP_PASSWORD / EMAIL_RECIPIENT) — skipping email alert")
         return False
 
     msg = MIMEMultipart("alternative")
@@ -238,7 +237,7 @@ def send_email(
     msg["To"]      = _recipient
 
     # Plain text fallback
-    plain = f"GaadiScout Deal Alert\n\nCheck your HTML-capable email client to view this alert."
+    plain = "GaadiScout Deal Alert\n\nCheck your HTML-capable email client to view this alert."
     msg.attach(MIMEText(plain, "plain"))
     msg.attach(MIMEText(html_body, "html"))
 

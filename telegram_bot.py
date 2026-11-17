@@ -7,7 +7,6 @@ import os
 import json
 import logging
 import requests
-from datetime import datetime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -102,11 +101,11 @@ def send_message(text: str, bot_token: str = None, chat_id: str = None) -> bool:
     Send a raw Markdown message to a Telegram chat.
     Returns True on success, False on failure.
     """
-    token = bot_token or TELEGRAM_BOT_TOKEN
-    cid   = chat_id or TELEGRAM_CHAT_ID
+    token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN", TELEGRAM_BOT_TOKEN)
+    cid   = chat_id or os.getenv("TELEGRAM_CHAT_ID", TELEGRAM_CHAT_ID)
 
     if not token or not cid:
-        logger.error("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured")
+        logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured — skipping Telegram alert")
         return False
 
     url = f"{TELEGRAM_API_BASE}/bot{token}/sendMessage"
@@ -118,6 +117,10 @@ def send_message(text: str, bot_token: str = None, chat_id: str = None) -> bool:
     }
     try:
         resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
+        if resp.status_code == 400 and payload.get("parse_mode") == "Markdown":
+            logger.warning("Telegram Markdown parse failed (400), retrying as plain text")
+            payload.pop("parse_mode", None)
+            resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         if data.get("ok"):

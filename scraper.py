@@ -71,6 +71,12 @@ def _fetch_page(url: str, session: requests.Session) -> BeautifulSoup | None:
         return None
     try:
         resp = session.get(url, headers=HEADERS, timeout=15)
+        if resp.status_code in (403, 429, 503):
+            logger.warning(
+                f"Received HTTP {resp.status_code} from {url} — "
+                "PakWheels may be rate-limiting or blocking this runner IP."
+            )
+            return None
         resp.raise_for_status()
         return BeautifulSoup(resp.content, "html.parser")
     except requests.RequestException as e:
@@ -293,7 +299,7 @@ def validate_listings(listings: list[dict]) -> dict:
     report = {}
 
     for field in key_fields:
-        missing = sum(1 for l in listings if not l.get(field))
+        missing = sum(1 for item in listings if not item.get(field))
         pct = missing / total * 100
         report[field] = round(pct, 1)
         if pct > WARN_MISSING_PCT:
@@ -371,7 +377,7 @@ def scrape_listings(
 
     # ── Data quality check ────────────────────────────────────────────────────
     logger.info("Running data quality validation …")
-    report = validate_listings(all_listings)
+    validate_listings(all_listings)
 
     return all_listings
 
@@ -395,7 +401,7 @@ if __name__ == "__main__":
     print("\n--- Data Quality Report ---")
     fields = ["city", "transmission", "mileage", "price", "year", "make", "model"]
     for f in fields:
-        present = sum(1 for l in results if l.get(f))
+        present = sum(1 for item in results if item.get(f))
         pct_ok = present / len(results) * 100
         status = "OK" if pct_ok >= 90 else "WARN"
         print(f"  [{status}] {f:15s}: {present}/{len(results)} ({pct_ok:.1f}%)")

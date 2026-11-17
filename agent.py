@@ -8,11 +8,13 @@ import os
 import json
 import logging
 from typing import Optional
+import requests
 
 from dotenv import load_dotenv
 load_dotenv()
 
 from langchain_groq import ChatGroq
+from langchain_core.runnables import RunnableLambda
 from pydantic import BaseModel, Field
 
 from db import (
@@ -34,6 +36,9 @@ logger = logging.getLogger(__name__)
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
 AGENT_MODEL     = os.getenv("AGENT_MODEL", "llama-3.1-8b-instant")   # free-tier Groq model
 AGENT_THRESHOLD = int(os.getenv("AGENT_THRESHOLD", "7"))             # min deal_score to pass
+AGENT_PROVIDER  = os.getenv("AGENT_PROVIDER", "groq").lower().strip()
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "")
+OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "")
 
 # ── Risk-flag keyword map (pre-LLM fast filter on description text) ────────────
 RISK_KEYWORDS: dict[str, list[str]] = {
@@ -74,32 +79,116 @@ class DealEvaluation(BaseModel):
     )
 
 
+def configure_langsmith_tracing() -> bool:
+    """
+    Validate optional LangSmith tracing via standard environment variables:
+      LANGCHAIN_TRACING_V2 (or LANGSMITH_TRACING), LANGCHAIN_API_KEY (or LANGSMITH_API_KEY),
+      and optional LANGCHAIN_PROJECT / LANGSMITH_PROJECT / LANGCHAIN_ENDPOINT.
+    If tracing is requested without an API key, disables tracing with a warning so it stays a no-op.
+    Returns True when tracing is active, False otherwise.
+    """
+    tracing_flag = (
+        os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
+        or os.getenv("LANGSMITH_TRACING", "").lower() == "true"
+    )
+    if not tracing_flag:
+        return False
+
+    api_key = os.getenv("LANGCHAIN_API_KEY", "").strip() or os.getenv("LANGSMITH_API_KEY", "").strip()
+    if not api_key:
+        logger.warning(
+            "LangSmith tracing flag is set, but LANGCHAIN_API_KEY / LANGSMITH_API_KEY is missing. "
+            "Disabling tracing and continuing normally."
+        )
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
+        os.environ["LANGSMITH_TRACING"] = "false"
+        return False
+
+    # Normalize so both LangChain and LangGraph pick up the standard variables
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    if not os.getenv("LANGCHAIN_API_KEY"):
+        os.environ["LANGCHAIN_API_KEY"] = api_key
+    project = os.getenv("LANGCHAIN_PROJECT") or os.getenv("LANGSMITH_PROJECT")
+    if project:
+        os.environ["LANGCHAIN_PROJECT"] = project
+    logger.info(f"LangSmith tracing enabled (project={project or 'default'})")
+    return True
+
+
 # ── LLM setup ─────────────────────────────────────────────────────────────────
 
 def _get_llm() -> ChatGroq:
-    if not GROQ_API_KEY:
+    configure_langsmith_tracing()
+    api_key = os.getenv("GROQ_API_KEY", GROQ_API_KEY)
+    model = os.getenv("AGENT_MODEL", AGENT_MODEL)
+    if not api_key:
         raise ValueError("GROQ_API_KEY environment variable is not set")
     return ChatGroq(
-        api_key=GROQ_API_KEY,
-        model=AGENT_MODEL,
+        api_key=api_key,
+        model=model,
         temperature=0.1,
         max_tokens=512,
     )
 
 
-def _build_structured_chain():
-    """Build a LangChain chain that returns DealEvaluation."""
+def _invoke_ollama_structured(messages: list[dict]) -> DealEvaluation:
+    """
+    Call an Ollama server via HTTP (/api/chat) using OLLAMA_BASE_URL and OLLAMA_MODEL
+    from the environment (no hardcoded model) and parse the response into DealEvaluation.
+    """
+    configure_langsmith_tracing()
+    base_url = os.getenv("OLLAMA_BASE_URL", OLLAMA_BASE_URL).strip().rstrip("/")
+    model = os.getenv("OLLAMA_MODEL", OLLAMA_MODEL).strip()
+    if not base_url or not model:
+        raise ValueError("OLLAMA_BASE_URL and OLLAMA_MODEL must be set when AGENT_PROVIDER=ollama")
+
+    schema_instruction = (
+        "\n\nRespond ONLY with valid JSON matching this schema:\n"
+        '{"deal_score": <int 1-10>, "price_gap_percent": <float>, '
+        '"risk_flags": [<str>, ...], "summary": "<str>"}'
+    )
+    formatted_msgs = []
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        if role == "system":
+            content = content + schema_instruction
+        formatted_msgs.append({"role": role, "content": content})
+
+    payload = {
+        "model": model,
+        "messages": formatted_msgs,
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0.1},
+    }
+    resp = requests.post(f"{base_url}/api/chat", json=payload, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    raw_content = (data.get("message") or {}).get("content") or data.get("response") or ""
+    parsed = json.loads(raw_content)
+    return DealEvaluation.model_validate(parsed)
+
+
+def _build_structured_chain(provider: Optional[str] = None):
+    """Build a LangChain runnable that returns DealEvaluation for groq (default) or ollama."""
+    active_provider = (provider or os.getenv("AGENT_PROVIDER", AGENT_PROVIDER)).lower().strip()
+    if active_provider == "ollama":
+        return RunnableLambda(_invoke_ollama_structured)
     llm = _get_llm()
     return llm.with_structured_output(DealEvaluation)
 
 
-# Lazy singleton to avoid re-initialising on every call
+# Lazy singleton per provider to avoid re-initialising on every call
 _chain = None
+_chain_provider = None
 
 def get_chain():
-    global _chain
-    if _chain is None:
-        _chain = _build_structured_chain()
+    global _chain, _chain_provider
+    active_provider = os.getenv("AGENT_PROVIDER", AGENT_PROVIDER).lower().strip()
+    if _chain is None or _chain_provider != active_provider:
+        _chain = _build_structured_chain(active_provider)
+        _chain_provider = active_provider
     return _chain
 
 
@@ -238,7 +327,7 @@ def evaluate_deals(
 
         if evaluation is None:
             # Evaluation failed — assign a conservative score
-            logger.warning(f"  ⚠️  Evaluation failed, assigning fallback score 5")
+            logger.warning("  ⚠️  Evaluation failed, assigning fallback score 5")
             evaluation = DealEvaluation(
                 deal_score=5,
                 price_gap_percent=listing.get("price_gap_pct", 0),
@@ -318,7 +407,7 @@ if __name__ == "__main__":
     print("\nEvaluating mock listing …")
     result = evaluate_single_deal(mock_listing)
     if result:
-        print(f"\n✅ Evaluation result:")
+        print("\n✅ Evaluation result:")
         print(f"  Deal Score:  {result.deal_score}/10")
         print(f"  Price Gap:   {result.price_gap_percent:.1f}%")
         print(f"  Risk Flags:  {result.risk_flags or 'None'}")

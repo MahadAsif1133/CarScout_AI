@@ -21,7 +21,6 @@ Fine-tuned LLM predictor (optional): loads lora_adapter/ if present.
 
 import os
 import re
-import json
 import logging
 import sqlite3
 import statistics

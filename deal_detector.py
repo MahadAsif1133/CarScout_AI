@@ -7,7 +7,6 @@ sufficiently below predicted fair value.
 
 import os
 import logging
-from pathlib import Path
 
 from db import (
     DB_PATH,

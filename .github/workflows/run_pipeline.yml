@@ -46,7 +46,7 @@ jobs:
 
       # ── 4. Restore DB from cache (persist between runs) ─────────────────────
       - name: Restore database cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: gaadiscout.db
           key: gaadiscout-db-${{ github.run_id }}
@@ -102,7 +102,7 @@ jobs:
 
       # ── 8. Save DB back to cache ─────────────────────────────────────────────
       - name: Save database cache
-        if: always()
+        if: always() && hashFiles('gaadiscout.db') != ''
         uses: actions/cache/save@v4
         with:
           path: gaadiscout.db
